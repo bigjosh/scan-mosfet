@@ -1,0 +1,14 @@
+# MOSFET Scanner Dependencies
+
+# VISA library for controlling Siglent SPD3303C power supply
+pyvisa>=1.13.0
+pyvisa-py>=0.7.0
+
+# NI-VISA backend (alternative to pyvisa-py)
+# Note: NI-VISA must be installed separately from ni.com
+
+# Joulescope SDK for JS110 current measurements
+joulescope>=1.1.0
+
+# Numerical computing
+numpy>=1.21.0
