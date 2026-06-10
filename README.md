@@ -1,6 +1,13 @@
 # scan-mosfet
 Charatarize a MOSFET with an Ids versus Vg and Vd scan
 
+> **Arduino-based scanner (v1):** there is now a standalone ~$30 rig — Arduino
+> Uno + 2× MCP4725 — that runs a 3-phase device cycle (gate leakage,
+> positive- and negative-Vgs Ids maps) with a guided bring-up wizard and
+> self-tests. See [arduino-scanner/README.md](arduino-scanner/README.md) and
+> [arduino-scanner/plan.md](arduino-scanner/plan.md). The Siglent+Joulescope
+> bench below remains the reference instrument.
+
 ## Hardware
 
 We have connected via USB a power supply and a Joulescope.
@@ -96,10 +103,56 @@ python scan_mosfet.py --dry-run --vds-stop 1.0
 
 ### Output
 
-The program will save the data to a CSV file. By default the file is named "scan-mosfet-<timestamp>.csv", butr this can be configured via command line arguments.
+The program saves data to a CSV file **incrementally** during the scan. By default the file is named "scan-mosfet-<timestamp>.csv", but this can be configured via command line arguments.
 
-The data will be in the form of a matrix with Vds values along the top and Vgs values down the left side. Each cell in the matrix will contain the Ids value at that Vds and Vgs combination.
+**Incremental Writing:**
+- CSV file is created at scan start with the header
+- After each Vds row completes, the file is updated with new data
+- This allows real-time visualization while the scan is running
+- If the scan is interrupted, partial data is still saved
+
+The data is in matrix format with Vds values along the top and Vgs values down the left side. Each cell contains the Ids value at that (Vgs, Vds) combination.
 
 ### Progress    
 
 By default the program will print the current scan values and the samples taken to the console. This can be disabled via command line arguments.
+
+## Real-time Visualization
+
+The `visualize_scan.py` program provides live visualization of the scan data as a heatmap:
+
+**Features:**
+- **X-axis**: Vgs (Gate-Source Voltage)
+- **Y-axis**: Vds (Drain-Source Voltage)  
+- **Color**: Ids (Drain Current) in milliamps
+- **Live updates**: Automatically refreshes as new data is written to the CSV
+- **Dynamic color scale**: Adjusts to the data range as the scan progresses
+
+**Usage:**
+
+```bash
+# Monitor the most recent scan file (auto-detected)
+python visualize_scan.py
+
+# Monitor a specific file
+python visualize_scan.py scan-mosfet-20251103_120344.csv
+
+# Adjust refresh rate (default: 1 second)
+python visualize_scan.py --refresh 0.5
+
+# Show static plot (no live updates)
+python visualize_scan.py --static scan-mosfet-20251103_120344.csv
+```
+
+**Tip:** Run the visualization in a separate terminal window while the scan is running to see the MOSFET characteristics develop in real-time!
+
+**Example workflow:**
+```bash
+# Terminal 1: Start the scan
+python scan_mosfet.py
+
+# Terminal 2: Start live visualization (in a separate window)
+python visualize_scan.py
+
+# Watch the heatmap update as each Vds row completes!
+```

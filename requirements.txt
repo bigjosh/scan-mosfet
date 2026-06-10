@@ -12,3 +12,9 @@ joulescope>=1.1.0
 
 # Numerical computing
 numpy>=1.21.0
+
+# Visualization
+matplotlib>=3.5.0
+
+# Arduino scanner (arduino-scanner/scan_arduino.py)
+pyserial>=3.5
