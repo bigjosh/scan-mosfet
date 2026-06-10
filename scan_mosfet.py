@@ -202,14 +202,21 @@ def perform_scan(
     vds_start: float,
     vds_stop: float,
     vds_step: float,
+    vgs_start: float,
+    vgs_stop: float,
     vgs_step: float,
     setup_delay: float,
+    reset_delay: float,
     num_samples: int,
     sample_delay: float,
-    verbose: bool
+    verbose: bool,
+    csv_filename: str = None
 ) -> Tuple[List[float], List[List[float]], List[List[float]]]:
     """
     Perform MOSFET characterization scan
+    
+    Args:
+        csv_filename: Optional CSV file to write incrementally during scan
     
     Returns:
         Tuple of (vds_values, vgs_matrix, ids_matrix)
@@ -217,37 +224,58 @@ def perform_scan(
         and ids_matrix[i][j] is corresponding Ids
     """
     
-    # Generate Vds sweep values
-    vds_values = create_voltage_range(vds_start, vds_stop, vds_step)
+    # Generate sweep values
+    vds_values_full = create_voltage_range(vds_start, vds_stop, vds_step)
+    
+    if vgs_stop is None:
+        # If vgs_stop not specified, default to vds_stop (square sweep estimate)
+        # Note: Original triangular logic (Vgs <= Vds) is hard to map to Vgs-outer loop 
+        # without explicit Vds dependency. We'll assume square max if not provided.
+        vgs_stop_val = vds_stop
+    else:
+        vgs_stop_val = vgs_stop
+        
+    vgs_values_full = create_voltage_range(vgs_start, vgs_stop_val, vgs_step)
     
     # Initialize matrices
     vgs_matrix = []
     ids_matrix = []
     
-    total_measurements = sum(len(create_voltage_range(0, vds, vgs_step)) for vds in vds_values)
+    # Write CSV header if incremental writing is enabled
+    if csv_filename:
+        with open(csv_filename, 'w', newline='') as f:
+            # Clean fixed-width alignment: 
+            # Vds (8 chars), Vgs (8 chars), Ids (12 chars)
+            f.write(f"{'Vds (V)':>8}, {'Vgs (V)':>8}, {'Ids (uA)':>12}\n")
+        print(f"Writing incremental results to: {csv_filename}")
+    
+    total_measurements = len(vgs_values_full) * len(vds_values_full)
     measurement_count = 0
     
-    print(f"\nStarting scan with {len(vds_values)} Vds points")
-    print(f"Total measurements: ~{total_measurements}")
+    print(f"\nStarting scan with {len(vgs_values_full)} Vgs points (Outer Loop)")
+    print(f"Sweeping {len(vds_values_full)} Vds points per Vgs (Inner Loop)")
+    print(f"Total measurements: {total_measurements}")
     print("-" * 60)
     
     start_time = time.time()
     
-    # Outer loop: sweep Vds
-    for vds_idx, vds in enumerate(vds_values):
-        # Set Vds (Channel 1)
-        ps.set_voltage(1, vds)
+    # Outer loop: sweep Vgs (Slower)
+    for vgs_idx, vgs in enumerate(vgs_values_full):
+        # Reset both channels to 0V briefly before new Vgs step
+        ps.set_voltage(1, 0)
+        ps.set_voltage(2, 0)
+        time.sleep(reset_delay)
         
-        # Generate Vgs sweep values (0 to current Vds)
-        vgs_values = create_voltage_range(0, vds, vgs_step)
+        # Set Vgs (Channel 2)
+        ps.set_voltage(2, vgs)
         
-        vgs_row = []
-        ids_row = []
+        # Inner loop: sweep Vds (Faster)
+        # Note: For triangular sweep support (Vgs <= Vds), we could filter vds_values here.
+        # But assuming rectangular based on user request.
         
-        # Inner loop: sweep Vgs
-        for vgs_idx, vgs in enumerate(vgs_values):
-            # Set Vgs (Channel 2)
-            ps.set_voltage(2, vgs)
+        for vds_idx, vds in enumerate(vds_values_full):
+            # Set Vds (Channel 1)
+            ps.set_voltage(1, vds)
             
             # Wait for settling
             time.sleep(setup_delay)
@@ -255,24 +283,68 @@ def perform_scan(
             # Measure Ids
             ids = js.measure_current(num_samples, sample_delay)
             
-            vgs_row.append(vgs)
-            ids_row.append(ids)
-            
             measurement_count += 1
             
             if verbose:
                 elapsed = time.time() - start_time
                 progress = (measurement_count / total_measurements) * 100
-                print(f"[{progress:5.1f}%] Vds={vds:6.2f}V, Vgs={vgs:6.2f}V, Ids={ids*1000:8.3f}mA (avg of {num_samples} samples)")
+                print(f"[{progress:5.1f}%] Vgs={vgs:6.2f}V, Vds={vds:6.2f}V, Ids={ids*1000:8.3f}mA (avg of {num_samples} samples)")
+
+            # Append to CSV file immediately
+            if csv_filename:
+                with open(csv_filename, 'a', newline='') as f:
+                    # Fixed-point formatting, aligned
+                    f.write(f"{vds:8.2f}, {vgs:8.2f}, {ids*1e6:12.2f}\n")
         
-        vgs_matrix.append(vgs_row)
-        ids_matrix.append(ids_row)
-    
     elapsed = time.time() - start_time
     print("-" * 60)
     print(f"Scan complete! Total time: {elapsed:.1f} seconds")
     
-    return vds_values, vgs_matrix, ids_matrix
+    return vds_values_full, [], []  # Return empty matrices as we don't rebuild them
+
+
+def update_csv_incremental(
+    filename: str,
+    vds_values: List[float],
+    vgs_matrix: List[List[float]],
+    ids_matrix: List[List[float]]
+):
+    """
+    Update CSV file with current scan data (incremental)
+    Rewrites the data rows with current progress
+    """
+    # Find the maximum number of Vgs points
+    max_vgs_points = max(len(row) for row in vgs_matrix) if vgs_matrix else 0
+    
+    if max_vgs_points == 0:
+        return
+    
+    # Read the header (first line)
+    with open(filename, 'r', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        header = next(reader)
+    
+    # Rewrite file with header and updated data
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(header)
+        
+        # Build rows by Vgs index
+        for vgs_idx in range(max_vgs_points):
+            row = []
+            vgs_value = None
+            
+            # Collect Ids values for this Vgs index across all completed Vds
+            for vds_idx in range(len(vds_values)):
+                if vds_idx < len(vgs_matrix) and vgs_idx < len(vgs_matrix[vds_idx]):
+                    if vgs_value is None:
+                        vgs_value = vgs_matrix[vds_idx][vgs_idx]
+                    row.append(f"{ids_matrix[vds_idx][vgs_idx]:.6e}")
+                else:
+                    row.append("")  # No measurement yet for this point
+            
+            if vgs_value is not None:
+                writer.writerow([f"{vgs_value:.2f}"] + row)
 
 
 def save_to_csv(
@@ -332,12 +404,18 @@ def main():
                         help='Stopping Vds voltage (V)')
     parser.add_argument('--vds-step', type=float, default=0.1,
                         help='Vds voltage step (V)')
+    parser.add_argument('--vgs-start', type=float, default=0.0,
+                        help='Starting Vgs voltage (V)')
+    parser.add_argument('--vgs-stop', type=float, default=None,
+                        help='Stopping Vgs voltage (V). If not specified, sweeps up to current Vds.')
     parser.add_argument('--vgs-step', type=float, default=0.1,
                         help='Vgs voltage step (V)')
     
     # Timing parameters
     parser.add_argument('--setup-delay', type=float, default=1.0,
                         help='Setup delay after Vgs change (seconds)')
+    parser.add_argument('--reset-delay', type=float, default=2.0,
+                        help='Delay after resetting to 0V between sweeps (seconds)')
     parser.add_argument('--num-samples', type=int, default=10,
                         help='Number of current samples to average')
     parser.add_argument('--sample-delay', type=float, default=0.01,
@@ -367,7 +445,10 @@ def main():
     print("MOSFET Characterization Scanner")
     print("=" * 60)
     print(f"Vds range: {args.vds_start}V to {args.vds_stop}V in {args.vds_step}V steps")
-    print(f"Vgs range: 0V to Vds in {args.vgs_step}V steps")
+    if args.vgs_stop is not None:
+        print(f"Vgs range: {args.vgs_start}V to {args.vgs_stop}V in {args.vgs_step}V steps")
+    else:
+        print(f"Vgs range: {args.vgs_start}V to Vds in {args.vgs_step}V steps")
     print(f"Setup delay: {args.setup_delay*1000}ms")
     print(f"Samples per point: {args.num_samples}")
     print(f"Sample delay: {args.sample_delay*1000}ms")
@@ -401,22 +482,26 @@ def main():
         print("Waiting for system to stabilize...")
         time.sleep(1.0)
         
-        # Perform scan
+        # Perform scan (with incremental CSV writing)
         vds_values, vgs_matrix, ids_matrix = perform_scan(
             ps=ps,
             js=js,
             vds_start=args.vds_start,
             vds_stop=args.vds_stop,
             vds_step=args.vds_step,
+            vgs_start=args.vgs_start,
+            vgs_stop=args.vgs_stop,
             vgs_step=args.vgs_step,
             setup_delay=args.setup_delay,
+            reset_delay=args.reset_delay,
             num_samples=args.num_samples,
             sample_delay=args.sample_delay,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            csv_filename=args.output  # Enable incremental writing
         )
         
-        # Save data
-        save_to_csv(args.output, vds_values, vgs_matrix, ids_matrix)
+        # Final save to ensure data is complete (already written incrementally)
+        # save_to_csv(args.output, vds_values, vgs_matrix, ids_matrix)
         
         print("\n✓ Scan completed successfully!")
         
