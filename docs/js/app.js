@@ -1,6 +1,6 @@
 // App controller: connect/UI/scan/history/bring-up wiring.
 
-import { pickTransport, WebSerialTransport, WebUsbCdcTransport } from './transport.js';
+import { pickTransport, usbDiagnostics, WebSerialTransport, WebUsbCdcTransport } from './transport.js';
 import { MockTransport } from './mock.js';
 import { Rig } from './protocol.js';
 import { DEFAULT_PARAMS, AbortFlag, runCycle, estimateSeconds } from './scan.js';
@@ -169,6 +169,13 @@ $('btn-connect').addEventListener('click', async () => {
 $('btn-demo').addEventListener('click', async () => {
   if (rig) { await rig.close(); rig = null; }
   await connectWith(new MockTransport());
+});
+
+$('btn-usbdiag').addEventListener('click', async () => {
+  const pre = $('usb-diag');
+  pre.hidden = false;
+  pre.textContent = 'running USB diagnostics...';
+  pre.textContent = await usbDiagnostics();
 });
 
 // ---------------------------------------------------------------- scanning

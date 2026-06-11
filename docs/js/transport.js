@@ -68,6 +68,7 @@ export class WebUsbCdcTransport extends BaseTransport {
       filters: [
         { vendorId: 0x2341 },  // Arduino
         { vendorId: 0x2a03 },  // Arduino.org
+        { classCode: 0x02 },   // any CDC communications device
       ],
     });
     const d = this.device;
@@ -153,4 +154,50 @@ export function pickTransport() {
   if (WebSerialTransport.available()) return new WebSerialTransport();
   if (WebUsbCdcTransport.available()) return new WebUsbCdcTransport();
   return null;
+}
+
+// Diagnostic dump: what can this browser actually see over WebUSB?
+// (Chrome's picker shows "no compatible devices" both when filters miss and
+// when the OS/another app hides the device - this tells the cases apart.)
+export async function usbDiagnostics() {
+  const lines = [];
+  lines.push(`browser: ${navigator.userAgent}`);
+  lines.push(`webusb: ${'usb' in navigator}, webserial: ${'serial' in navigator}`);
+  if (!('usb' in navigator)) return lines.join('\n');
+  try {
+    const granted = await navigator.usb.getDevices();
+    lines.push(`previously-granted devices: ${granted.length}`);
+    for (const d of granted) {
+      lines.push(`  vid=0x${d.vendorId.toString(16).padStart(4, '0')} ` +
+                 `pid=0x${d.productId.toString(16).padStart(4, '0')} ${d.productName || ''}`);
+    }
+  } catch (e) {
+    lines.push(`getDevices failed: ${e.message}`);
+  }
+  lines.push('opening UNFILTERED picker (pick the Arduino if listed)...');
+  try {
+    const d = await navigator.usb.requestDevice({ filters: [] });
+    lines.push(`picked: vid=0x${d.vendorId.toString(16).padStart(4, '0')} ` +
+               `pid=0x${d.productId.toString(16).padStart(4, '0')} "${d.productName || '?'}"`);
+    await d.open();
+    if (d.configuration === null) await d.selectConfiguration(1);
+    for (const i of d.configuration.interfaces) {
+      const a = i.alternates[0];
+      lines.push(`  iface ${i.interfaceNumber}: class=0x${a.interfaceClass.toString(16)} ` +
+                 `sub=0x${a.interfaceSubclass.toString(16)} ` +
+                 `eps=[${a.endpoints.map((e) => `${e.direction[0]}${e.endpointNumber}/${e.type}`).join(' ')}]`);
+      try {
+        await d.claimInterface(i.interfaceNumber);
+        lines.push(`    claim iface ${i.interfaceNumber}: OK`);
+        await d.releaseInterface(i.interfaceNumber);
+      } catch (e) {
+        lines.push(`    claim iface ${i.interfaceNumber}: ${e.name}: ${e.message}`);
+      }
+    }
+    await d.close();
+  } catch (e) {
+    lines.push(`picker/open result: ${e.name}: ${e.message}`);
+    lines.push('(NotFoundError here = picker was EMPTY or cancelled)');
+  }
+  return lines.join('\n');
 }

@@ -25,8 +25,10 @@
   <button data-screen="scan" class="active">Scan</button>
   <button data-screen="bringup">Bring-up</button>
   <button data-screen="history">History</button>
+  <button id="btn-usbdiag" class="ghost" title="Dump what WebUSB can see (connection troubleshooting)">USB?</button>
   <button id="btn-demo" class="ghost" title="Run against a simulated rig">Demo</button>
 </nav>
+<pre id="usb-diag" class="diag" hidden></pre>
 
 <main id="screen-scan" class="screen">
   <section class="panel params">

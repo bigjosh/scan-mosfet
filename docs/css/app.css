@@ -148,6 +148,13 @@ canvas.stacked { margin-top: 10px; }
 
 footer { padding: 18px 14px; font-size: 12px; }
 
+pre.diag {
+  margin: 10px 14px; padding: 10px 12px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--border);
+  font: 11.5px/1.5 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-all; color: var(--chart-fg);
+}
+
 @media (min-width: 900px) {
   #screen-scan { grid-template-columns: 360px 1fr; align-items: start; }
   .grid { grid-template-columns: repeat(3, 1fr); }
