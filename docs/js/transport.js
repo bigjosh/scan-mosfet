@@ -94,8 +94,26 @@ export class WebUsbCdcTransport extends BaseTransport {
     if (this.commIf === null || this.dataIf === null || this.epIn === null || this.epOut === null) {
       throw new Error('No CDC-ACM interface found - is this a 16U2-style Uno? (CH340 clones unsupported)');
     }
-    await d.claimInterface(this.commIf);
-    await d.claimInterface(this.dataIf);
+    const claimBoth = async () => {
+      await d.claimInterface(this.commIf);
+      await d.claimInterface(this.dataIf);
+    };
+    try {
+      await claimBoth();
+    } catch (e1) {
+      // Something else holds the interfaces (serial app / stale claim).
+      // A USB reset clears foreign claims; then reconfigure and retry once.
+      try {
+        await d.reset();
+        if (d.configuration === null) await d.selectConfiguration(1);
+        await claimBoth();
+      } catch (e2) {
+        throw new Error(
+          'Could not claim the USB interfaces - another app probably owns the ' +
+          'device. Force-stop any serial terminal app, clear its Open-by-default ' +
+          'in Android settings, replug, and retry. (' + (e2.message || e2) + ')');
+      }
+    }
 
     // SET_LINE_CODING: 115200 8N1
     const coding = new ArrayBuffer(7);
