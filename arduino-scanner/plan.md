@@ -126,6 +126,12 @@ Run the guided wizard: **`python bring-up.py`** — link → PINTEST harness dia
 - Both DACs verified ACKing at 0x60 (one per bus); `SETH/SETG 2.5` confirmed with VDD-compensated codes; `SAVEZERO` written. Analog sense wiring (A0–A3, R_low, R_gate, 10 nF) still to be built.
 - Keep the Arduino IDE Serial Monitor **closed** while `scan_arduino.py` runs — they contend for the COM port.
 
+## Web UI (2026-06-10)
+Browser front-end in **/docs** (GitHub Pages), replicating scan_arduino.py + bring-up.py:
+- **Targets:** Chrome Android via **WebUSB speaking CDC-ACM in JS** (Android has no Web Serial; genuine/16U2 Unos only) and desktop Chrome via **Web Serial** (desktop WebUSB can't claim CDC from the OS driver). Transport auto-picked; same firmware, same protocol.
+- Vanilla ES modules, no build step; hand-rolled canvas charts (viridis families, live per-point updates); scans stored in IndexedDB with on-demand CSV downloads (same columns/filenames as Python); PWA (offline after first load); wake lock during scans; `?demo` runs a full simulated rig (synthetic FET + jumper/empty-socket bench modes) used for automated testing.
+- Verified on desktop in demo mode end-to-end (scan, abort with partial save, history, CSVs, full 8-step wizard incl. cal math). Real-hardware paths verified for protocol identity; WebUSB-on-Android needs an on-phone test.
+
 ## v2 roadmap (after v1 works)
 - Op-amp stage (LM358/LM324 on +18 V, **force-sense at the terminal**) to extend drives to **0–15 V**.
 - Add a Low DAC + level-shift/differential current sense → independent Low drive and the **source-pedestal trick** for **negative Vgs/Vds**. 3rd DAC options: **MCP4728** quad, an address-variant MCP4725, or a TCA9548A I2C mux.

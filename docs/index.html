@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16181d">
+  <title>MOSFET Scanner</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header>
+  <div class="title">
+    <h1>MOSFET Scanner</h1>
+    <span class="sub">Arduino rig &middot; WebUSB / Web Serial</span>
+  </div>
+  <span id="conn-chip" class="chip off">disconnected</span>
+  <button id="btn-connect" class="primary">Connect</button>
+</header>
+
+<nav id="nav">
+  <button data-screen="scan" class="active">Scan</button>
+  <button data-screen="bringup">Bring-up</button>
+  <button data-screen="history">History</button>
+  <button id="btn-demo" class="ghost" title="Run against a simulated rig">Demo</button>
+</nav>
+
+<main id="screen-scan" class="screen">
+  <section class="panel params">
+    <label class="row">Scan name
+      <input id="p-name" type="text" value="scan" autocomplete="off">
+    </label>
+
+    <details id="params-details">
+      <summary>Sweep parameters</summary>
+      <div class="grid">
+        <label>H start (V)<input id="p-hStart" type="number" step="0.1" min="0" max="5"></label>
+        <label>H stop (V)<input id="p-hStop" type="number" step="0.1" min="0" max="5"></label>
+        <label>H step (V)<input id="p-hStep" type="number" step="0.01" min="0.01" max="5"></label>
+        <label>G start (V)<input id="p-gStart" type="number" step="0.1" min="0" max="5"></label>
+        <label>G stop (V)<input id="p-gStop" type="number" step="0.1" min="0" max="5"></label>
+        <label>G step (V)<input id="p-gStep" type="number" step="0.01" min="0.01" max="5"></label>
+        <label>ADC avg<input id="p-avg" type="number" step="1" min="1" max="200"></label>
+        <label>Settle (ms)<input id="p-settleMs" type="number" step="1" min="0" max="2000"></label>
+        <label>Gate settle (ms)<input id="p-gateSettleMs" type="number" step="10" min="0" max="5000"></label>
+        <label>R_low (&ohm;)<input id="p-rlow" type="number" step="1" min="1"></label>
+        <label>R_gate (&ohm;)<input id="p-rgate" type="number" step="1000" min="1000"></label>
+      </div>
+      <div class="phases">
+        <label><input id="p-p1" type="checkbox"> 1: gate leakage</label>
+        <label><input id="p-p2" type="checkbox"> 2: +Vgs map</label>
+        <label><input id="p-p3" type="checkbox"> 3: &minus;Vgs map</label>
+      </div>
+    </details>
+
+    <div class="runrow">
+      <button id="btn-scan" class="primary big" disabled>Scan</button>
+      <button id="btn-abort" class="danger big" hidden>Abort</button>
+      <span id="scan-est" class="dim"></span>
+    </div>
+    <div class="progress"><div id="progress-bar"></div></div>
+    <div id="scan-status" class="status"></div>
+  </section>
+
+  <section class="panel charts">
+    <div class="tabs" id="chart-tabs">
+      <button data-chart="p1">Phase 1</button>
+      <button data-chart="p2" class="active">Phase 2</button>
+      <button data-chart="p3">Phase 3</button>
+    </div>
+    <div id="wrap-p1" class="chart-wrap" hidden>
+      <canvas id="chart-p1"></canvas>
+      <div id="leak-summary" class="dim"></div>
+    </div>
+    <div id="wrap-p2" class="chart-wrap"><canvas id="chart-p2"></canvas></div>
+    <div id="wrap-p3" class="chart-wrap" hidden><canvas id="chart-p3"></canvas></div>
+  </section>
+</main>
+
+<main id="screen-bringup" class="screen" hidden>
+  <section class="panel">
+    <p class="dim">Guided check of a freshly assembled rig: link &rarr; harness &rarr; DACs &rarr;
+    no-DUT self-test &rarr; jumper-wire functional tests &rarr; DMM calibration.
+    Equivalent of <code>bring-up.py</code>.</p>
+    <button id="btn-bringup" class="primary big" disabled>Start bring-up</button>
+    <ol id="bringup-steps" class="steps"></ol>
+    <div id="bringup-summary" class="status"></div>
+  </section>
+</main>
+
+<main id="screen-history" class="screen" hidden>
+  <section class="panel" id="history-list-panel">
+    <h2>Saved scans</h2>
+    <div id="history-list"></div>
+  </section>
+  <section class="panel" id="history-view" hidden>
+    <div class="runrow">
+      <button id="btn-hv-back" class="ghost">&larr; Back</button>
+      <h2 id="hv-title"></h2>
+    </div>
+    <div id="hv-downloads" class="runrow"></div>
+    <div id="hv-wrap-p1" class="chart-wrap" hidden>
+      <canvas id="hv-chart-p1"></canvas>
+      <div id="hv-leak" class="dim"></div>
+    </div>
+    <div id="hv-wrap-p2" class="chart-wrap" hidden><canvas id="hv-chart-p2"></canvas></div>
+    <div id="hv-wrap-p3" class="chart-wrap" hidden><canvas id="hv-chart-p3"></canvas></div>
+  </section>
+</main>
+
+<footer class="dim">
+  scan-mosfet &middot; <a href="https://github.com/bigjosh/scan-mosfet">github</a> &middot;
+  needs Chrome (Android: WebUSB, desktop: Web Serial)
+</footer>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
