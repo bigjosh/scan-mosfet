@@ -70,7 +70,10 @@
       <button data-chart="cv" class="active">Curves</button>
       <button data-chart="p1">Gate leakage</button>
     </div>
-    <div id="wrap-cv" class="chart-wrap"><canvas id="chart-cv"></canvas></div>
+    <div id="wrap-cv" class="chart-wrap">
+      <canvas id="chart-cv-pos"></canvas>
+      <canvas id="chart-cv-neg" class="stacked"></canvas>
+    </div>
     <div id="wrap-p1" class="chart-wrap" hidden>
       <canvas id="chart-p1"></canvas>
       <div id="leak-summary" class="dim"></div>
@@ -100,7 +103,10 @@
       <h2 id="hv-title"></h2>
     </div>
     <div id="hv-downloads" class="runrow"></div>
-    <div id="hv-wrap-cv" class="chart-wrap" hidden><canvas id="hv-chart-cv"></canvas></div>
+    <div id="hv-wrap-cv" class="chart-wrap" hidden>
+      <canvas id="hv-chart-cv-pos"></canvas>
+      <canvas id="hv-chart-cv-neg" class="stacked"></canvas>
+    </div>
     <div id="hv-wrap-p1" class="chart-wrap" hidden>
       <canvas id="hv-chart-p1"></canvas>
       <div id="hv-leak" class="dim"></div>

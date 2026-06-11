@@ -4,7 +4,7 @@ import { pickTransport, WebSerialTransport, WebUsbCdcTransport } from './transpo
 import { MockTransport } from './mock.js';
 import { Rig } from './protocol.js';
 import { DEFAULT_PARAMS, AbortFlag, runCycle, estimateSeconds } from './scan.js';
-import { MirrorChart, LeakBars } from './chart.js';
+import { FamilyChart, LeakBars } from './chart.js';
 import { buildSteps } from './bringup.js';
 import { timestamp, sanitizeName } from './convert.js';
 import * as store from './store.js';
@@ -19,12 +19,20 @@ let wakeLock = null;
 
 // ---------------------------------------------------------------- charts
 
+// Phases 2 and 3 get separate stacked charts: in phase 3 the source/drain
+// roles are physically swapped, so each regime gets its own x reference.
+const POS_OPTS = { xLabel: 'V_high - V_low (V)   (Vlow ~ 0)', yLabel: 'Ids (uA)',
+  colorLabel: 'Vgs commanded (V)' };
+const NEG_OPTS = { xLabel: 'V_low - V_high (V)   (Vlow ~ 5 V)', yLabel: 'I Low->High (uA)',
+  colorLabel: 'Vgs commanded (V)' };
 const charts = {
-  cv: new MirrorChart($('chart-cv')),
+  cvPos: new FamilyChart($('chart-cv-pos'), POS_OPTS),
+  cvNeg: new FamilyChart($('chart-cv-neg'), NEG_OPTS),
   p1: new LeakBars($('chart-p1')),
 };
 const hvCharts = {
-  cv: new MirrorChart($('hv-chart-cv')),
+  cvPos: new FamilyChart($('hv-chart-cv-pos'), POS_OPTS),
+  cvNeg: new FamilyChart($('hv-chart-cv-neg'), NEG_OPTS),
   p1: new LeakBars($('hv-chart-p1')),
 };
 
@@ -33,7 +41,8 @@ function showChart(which) {
     $(`wrap-${k}`).hidden = k !== which;
     document.querySelector(`#chart-tabs [data-chart="${k}"]`).classList.toggle('active', k === which);
   }
-  charts[which].requestDraw?.();
+  if (which === 'cv') { charts.cvPos.requestDraw(); charts.cvNeg.requestDraw(); }
+  else charts.p1.requestDraw();
 }
 $('chart-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-chart]');
@@ -206,7 +215,8 @@ $('btn-scan').addEventListener('click', async () => {
   bar.style.width = '0%';
   $('leak-summary').textContent = '';
   charts.p1.set(0, 0);
-  charts.cv.reset(p.gStart - 5, p.gStop);  // color span covers both halves
+  charts.cvPos.reset(p.gStart, p.gStop, 'Vgs > 0');
+  charts.cvNeg.reset(p.gStart - 5, p.gStop - 5, 'Vgs < 0 (High/Low roles reversed)');
 
   const cb = {
     phaseStart(phase) {
@@ -226,13 +236,14 @@ $('btn-scan').addEventListener('click', async () => {
       done++; bar.style.width = `${(100 * done) / total}%`;
     },
     curveStart(phase, vgs) {
-      charts.cv.startCurve(phase === 2 ? 'top' : 'bottom', vgs);
+      (phase === 2 ? charts.cvPos : charts.cvNeg).startCurve(vgs);
     },
     point(phase, vgsCmd, vdsCmd, pt) {
       const key = `phase${phase}`;
       record[key] = record[key] || { rows: [] };
       record[key].rows.push({ vdsCmd, vgsCmd, pt });
-      charts.cv.addPoint(phase === 2 ? 'top' : 'bottom', Math.abs(pt.vds), Math.abs(pt.idsUa));
+      if (phase === 2) charts.cvPos.addPoint(pt.vds, pt.idsUa);
+      else charts.cvNeg.addPoint(-pt.vds, -pt.idsUa);  // Low-referenced, Low->High positive
       done++;
       if (done % 3 === 0 || done === total) bar.style.width = `${(100 * done) / total}%`;
     },
@@ -268,14 +279,15 @@ $('btn-abort').addEventListener('click', () => {
 
 // ---------------------------------------------------------------- history
 
-function rowsToCurves(rows) {
-  // magnitudes for the mirror chart: x = |Vds_meas|, y = |Ids|
+function rowsToCurves(rows, reversed = false) {
+  // reversed (phase 3): x = Vlow - Vhigh, y = current in the Low->High direction
+  const s = reversed ? -1 : 1;
   const byVgs = new Map();
   for (const r of rows) {
     if (!byVgs.has(r.vgsCmd)) byVgs.set(r.vgsCmd, { vgs: r.vgsCmd, xs: [], ys: [] });
     const c = byVgs.get(r.vgsCmd);
-    c.xs.push(Math.abs(r.pt.vds));
-    c.ys.push(Math.abs(r.pt.idsUa));
+    c.xs.push(s * r.pt.vds);
+    c.ys.push(s * r.pt.idsUa);
   }
   return [...byVgs.values()];
 }
@@ -337,13 +349,15 @@ async function renderHistoryView(id) {
       `forward Igs ${rec.phase1.fwd.igsUa.toFixed(3)} uA · reverse ${rec.phase1.rev.igsUa.toFixed(3)} uA`;
   }
   const prm = rec.params || DEFAULT_PARAMS;
-  const hasSweeps = !!(rec.phase2 || rec.phase3);
-  $('hv-wrap-cv').hidden = !hasSweeps;
-  if (hasSweeps) {
-    hvCharts.cv.setData(
-      rec.phase2 ? rowsToCurves(rec.phase2.rows) : [],
-      rec.phase3 ? rowsToCurves(rec.phase3.rows) : [],
-      prm.gStart - 5, prm.gStop);
+  $('hv-wrap-cv').hidden = !(rec.phase2 || rec.phase3);
+  $('hv-chart-cv-pos').hidden = !rec.phase2;
+  $('hv-chart-cv-neg').hidden = !rec.phase3;
+  if (rec.phase2) {
+    hvCharts.cvPos.setData(rowsToCurves(rec.phase2.rows), prm.gStart, prm.gStop, 'Vgs > 0');
+  }
+  if (rec.phase3) {
+    hvCharts.cvNeg.setData(rowsToCurves(rec.phase3.rows, true),
+      prm.gStart - 5, prm.gStop - 5, 'Vgs < 0 (High/Low roles reversed)');
   }
 }
 

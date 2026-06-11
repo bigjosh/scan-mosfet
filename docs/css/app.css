@@ -106,6 +106,7 @@ summary { cursor: pointer; color: var(--dim); font-size: 14px; padding: 4px 0; }
 .tabs button.active { border-color: var(--accent); color: #fff; }
 .chart-wrap { width: 100%; }
 canvas { display: block; width: 100%; border-radius: 8px; }
+canvas.stacked { margin-top: 10px; }
 
 /* bring-up steps */
 .steps { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
