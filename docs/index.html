@@ -67,16 +67,14 @@
 
   <section class="panel charts">
     <div class="tabs" id="chart-tabs">
-      <button data-chart="p1">Phase 1</button>
-      <button data-chart="p2" class="active">Phase 2</button>
-      <button data-chart="p3">Phase 3</button>
+      <button data-chart="cv" class="active">Curves</button>
+      <button data-chart="p1">Gate leakage</button>
     </div>
+    <div id="wrap-cv" class="chart-wrap"><canvas id="chart-cv"></canvas></div>
     <div id="wrap-p1" class="chart-wrap" hidden>
       <canvas id="chart-p1"></canvas>
       <div id="leak-summary" class="dim"></div>
     </div>
-    <div id="wrap-p2" class="chart-wrap"><canvas id="chart-p2"></canvas></div>
-    <div id="wrap-p3" class="chart-wrap" hidden><canvas id="chart-p3"></canvas></div>
   </section>
 </main>
 
@@ -102,12 +100,11 @@
       <h2 id="hv-title"></h2>
     </div>
     <div id="hv-downloads" class="runrow"></div>
+    <div id="hv-wrap-cv" class="chart-wrap" hidden><canvas id="hv-chart-cv"></canvas></div>
     <div id="hv-wrap-p1" class="chart-wrap" hidden>
       <canvas id="hv-chart-p1"></canvas>
       <div id="hv-leak" class="dim"></div>
     </div>
-    <div id="hv-wrap-p2" class="chart-wrap" hidden><canvas id="hv-chart-p2"></canvas></div>
-    <div id="hv-wrap-p3" class="chart-wrap" hidden><canvas id="hv-chart-p3"></canvas></div>
   </section>
 </main>
 

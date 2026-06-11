@@ -197,6 +197,169 @@ export class FamilyChart extends CanvasBase {
   }
 }
 
+// Mirror chart: the +Vgs family (phase 2) above and the -Vgs family (phase 3)
+// below a shared x-axis seam at gate = 0. Both halves plot positive
+// magnitudes: x = |V(High->Low)| with the same range/steps, y = |Ids|.
+// Each half autoscales independently (channel vs body-diode currents differ).
+export class MirrorChart extends CanvasBase {
+  constructor(canvas, { xLabel = '|V(High-Low)| measured (V)', yLabel = '|Ids| (uA)',
+                        colorLabel = 'Vgs commanded (V)' } = {}) {
+    super(canvas);
+    this.xLabel = xLabel; this.yLabel = yLabel; this.colorLabel = colorLabel;
+    this.reset(-5, 5);
+  }
+
+  reset(cMin, cMax) {
+    this.cMin = cMin; this.cMax = cMax;
+    this.top = [];     // {vgs, color, xs, ys} - phase 2, drawn upward
+    this.bottom = [];  // phase 3, drawn downward
+    this.requestDraw();
+  }
+
+  _color(vgs) {
+    return viridis(this.cMax > this.cMin ? (vgs - this.cMin) / (this.cMax - this.cMin) : 0.5);
+  }
+
+  startCurve(side, vgs) {
+    this[side].push({ vgs, color: this._color(vgs), xs: [], ys: [] });
+  }
+
+  addPoint(side, x, y) {
+    const list = this[side];
+    const c = list[list.length - 1];
+    if (!c) return;
+    c.xs.push(x); c.ys.push(y);
+    this.requestDraw();
+  }
+
+  setData(top, bottom, cMin, cMax) {
+    this.cMin = cMin; this.cMax = cMax;
+    this.top = top.map((c) => ({ ...c, color: this._color(c.vgs) }));
+    this.bottom = bottom.map((c) => ({ ...c, color: this._color(c.vgs) }));
+    this.requestDraw();
+  }
+
+  _resize() {
+    // mirror charts want more height than the default aspect
+    const parent = this.canvas.parentElement;
+    const w = Math.max(280, parent ? parent.clientWidth : this.canvas.clientWidth);
+    const h = Math.max(320, Math.min(560, Math.round(w * 0.8)));
+    const dpr = window.devicePixelRatio || 1;
+    this.w = w; this.h = h;
+    this.canvas.style.width = w + 'px';
+    this.canvas.style.height = h + 'px';
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.requestDraw();
+  }
+
+  draw() {
+    const { ctx, w, h } = this;
+    const css = getComputedStyle(this.canvas);
+    const fg = css.getPropertyValue('--chart-fg').trim() || '#ccc';
+    const grid = css.getPropertyValue('--chart-grid').trim() || '#333';
+    const bg = css.getPropertyValue('--chart-bg').trim() || '#16181d';
+    const ml = 58, mr = 54, mt = 12, mb = 40;
+    const pw = w - ml - mr, ph = h - mt - mb;
+    const cy = mt + ph / 2;  // the gate = 0 seam
+
+    let xMax = 0, topMax = 0, botMax = 0;
+    for (const c of this.top) for (let i = 0; i < c.xs.length; i++) {
+      if (c.xs[i] > xMax) xMax = c.xs[i];
+      if (c.ys[i] > topMax) topMax = c.ys[i];
+    }
+    for (const c of this.bottom) for (let i = 0; i < c.xs.length; i++) {
+      if (c.xs[i] > xMax) xMax = c.xs[i];
+      if (c.ys[i] > botMax) botMax = c.ys[i];
+    }
+    if (xMax < 1e-9) xMax = 5;
+    if (topMax < 1e-9) topMax = 1;
+    if (botMax < 1e-9) botMax = 1;
+    topMax *= 1.06; botMax *= 1.06;
+    const X = (x) => ml + (x / xMax) * pw;
+    const Yt = (y) => cy - (y / topMax) * (ph / 2);
+    const Yb = (y) => cy + (y / botMax) * (ph / 2);
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.font = '11px system-ui, sans-serif';
+
+    // x grid + ticks (full height)
+    ctx.strokeStyle = grid; ctx.fillStyle = fg; ctx.lineWidth = 1;
+    for (const tx of ticks(0, xMax)) {
+      const px = X(tx);
+      ctx.beginPath(); ctx.moveTo(px, mt); ctx.lineTo(px, mt + ph); ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(fmtTick(tx), px, mt + ph + 4);
+    }
+    // y grid + ticks, per half (labels positive both ways)
+    for (const ty of ticks(0, topMax, 4)) {
+      if (ty <= 0) continue;
+      const py = Yt(ty);
+      ctx.beginPath(); ctx.moveTo(ml, py); ctx.lineTo(ml + pw, py); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(fmtTick(ty), ml - 6, py);
+    }
+    for (const ty of ticks(0, botMax, 4)) {
+      if (ty <= 0) continue;
+      const py = Yb(ty);
+      ctx.beginPath(); ctx.moveTo(ml, py); ctx.lineTo(ml + pw, py); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(fmtTick(ty), ml - 6, py);
+    }
+
+    // the gate-0 seam
+    ctx.strokeStyle = fg; ctx.globalAlpha = 0.6; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(ml, cy); ctx.lineTo(ml + pw, cy); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = fg; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText('0', ml - 6, cy);
+
+    // curves
+    ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
+    for (const [list, Y] of [[this.top, Yt], [this.bottom, Yb]]) {
+      for (const c of list) {
+        if (!c.xs.length) continue;
+        ctx.strokeStyle = c.color;
+        ctx.beginPath();
+        ctx.moveTo(X(c.xs[0]), Y(c.ys[0]));
+        for (let i = 1; i < c.xs.length; i++) ctx.lineTo(X(c.xs[i]), Y(c.ys[i]));
+        ctx.stroke();
+      }
+    }
+
+    // half labels + axis labels
+    ctx.fillStyle = fg; ctx.globalAlpha = 0.8;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('Vgs > 0', ml + 8, mt + 4);
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('Vgs < 0', ml + 8, mt + ph - 4);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(this.xLabel, ml + pw / 2, h - 4);
+    ctx.save();
+    ctx.translate(12, cy); ctx.rotate(-Math.PI / 2);
+    ctx.fillText(this.yLabel, 0, 0);
+    ctx.restore();
+
+    // colorbar over the full Vgs span
+    const cbx = w - mr + 16, cbw = 10;
+    for (let i = 0; i < ph; i++) {
+      ctx.fillStyle = viridis(1 - i / ph);
+      ctx.fillRect(cbx, mt + i, cbw, 1.5);
+    }
+    ctx.fillStyle = fg; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(fmtTick(this.cMax), cbx + cbw + 3, mt + 5);
+    ctx.fillText(fmtTick(this.cMin), cbx + cbw + 3, mt + ph - 5);
+    ctx.save();
+    ctx.translate(cbx + cbw + 16, cy); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText(this.colorLabel, 0, 0);
+    ctx.restore();
+  }
+}
+
 // Phase-1 leakage bars on a log scale with the ~1 uA ceiling marked.
 export class LeakBars extends CanvasBase {
   constructor(canvas) {

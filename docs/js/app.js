@@ -4,7 +4,7 @@ import { pickTransport, WebSerialTransport, WebUsbCdcTransport } from './transpo
 import { MockTransport } from './mock.js';
 import { Rig } from './protocol.js';
 import { DEFAULT_PARAMS, AbortFlag, runCycle, estimateSeconds } from './scan.js';
-import { FamilyChart, LeakBars } from './chart.js';
+import { MirrorChart, LeakBars } from './chart.js';
 import { buildSteps } from './bringup.js';
 import { timestamp, sanitizeName } from './convert.js';
 import * as store from './store.js';
@@ -20,18 +20,16 @@ let wakeLock = null;
 // ---------------------------------------------------------------- charts
 
 const charts = {
+  cv: new MirrorChart($('chart-cv')),
   p1: new LeakBars($('chart-p1')),
-  p2: new FamilyChart($('chart-p2'), { xLabel: 'Vds measured (V)', yLabel: 'Ids (uA)', colorLabel: 'Vgs commanded (V)' }),
-  p3: new FamilyChart($('chart-p3'), { xLabel: 'Vds measured (V)', yLabel: 'Ids (uA)', colorLabel: 'Vgs commanded (V)' }),
 };
 const hvCharts = {
+  cv: new MirrorChart($('hv-chart-cv')),
   p1: new LeakBars($('hv-chart-p1')),
-  p2: new FamilyChart($('hv-chart-p2'), { xLabel: 'Vds measured (V)', yLabel: 'Ids (uA)', colorLabel: 'Vgs commanded (V)' }),
-  p3: new FamilyChart($('hv-chart-p3'), { xLabel: 'Vds measured (V)', yLabel: 'Ids (uA)', colorLabel: 'Vgs commanded (V)' }),
 };
 
 function showChart(which) {
-  for (const k of ['p1', 'p2', 'p3']) {
+  for (const k of ['cv', 'p1']) {
     $(`wrap-${k}`).hidden = k !== which;
     document.querySelector(`#chart-tabs [data-chart="${k}"]`).classList.toggle('active', k === which);
   }
@@ -208,13 +206,12 @@ $('btn-scan').addEventListener('click', async () => {
   bar.style.width = '0%';
   $('leak-summary').textContent = '';
   charts.p1.set(0, 0);
-  charts.p2.reset(p.gStart, p.gStop);
-  charts.p3.reset(p.gStart - 5, p.gStop - 5);
+  charts.cv.reset(p.gStart - 5, p.gStop);  // color span covers both halves
 
   const cb = {
     phaseStart(phase) {
       $('scan-status').textContent = `Running phase ${phase}...`;
-      showChart(`p${phase}`);
+      showChart(phase === 1 ? 'p1' : 'cv');
     },
     leak(mode, pt) {
       record.phase1 = record.phase1 || {};
@@ -229,13 +226,13 @@ $('btn-scan').addEventListener('click', async () => {
       done++; bar.style.width = `${(100 * done) / total}%`;
     },
     curveStart(phase, vgs) {
-      charts[`p${phase}`].startCurve(vgs);
+      charts.cv.startCurve(phase === 2 ? 'top' : 'bottom', vgs);
     },
     point(phase, vgsCmd, vdsCmd, pt) {
       const key = `phase${phase}`;
       record[key] = record[key] || { rows: [] };
       record[key].rows.push({ vdsCmd, vgsCmd, pt });
-      charts[`p${phase}`].addPoint(pt.vds, pt.idsUa);
+      charts.cv.addPoint(phase === 2 ? 'top' : 'bottom', Math.abs(pt.vds), Math.abs(pt.idsUa));
       done++;
       if (done % 3 === 0 || done === total) bar.style.width = `${(100 * done) / total}%`;
     },
@@ -272,12 +269,13 @@ $('btn-abort').addEventListener('click', () => {
 // ---------------------------------------------------------------- history
 
 function rowsToCurves(rows) {
+  // magnitudes for the mirror chart: x = |Vds_meas|, y = |Ids|
   const byVgs = new Map();
   for (const r of rows) {
     if (!byVgs.has(r.vgsCmd)) byVgs.set(r.vgsCmd, { vgs: r.vgsCmd, xs: [], ys: [] });
     const c = byVgs.get(r.vgsCmd);
-    c.xs.push(r.pt.vds);
-    c.ys.push(r.pt.idsUa);
+    c.xs.push(Math.abs(r.pt.vds));
+    c.ys.push(Math.abs(r.pt.idsUa));
   }
   return [...byVgs.values()];
 }
@@ -339,10 +337,14 @@ async function renderHistoryView(id) {
       `forward Igs ${rec.phase1.fwd.igsUa.toFixed(3)} uA · reverse ${rec.phase1.rev.igsUa.toFixed(3)} uA`;
   }
   const prm = rec.params || DEFAULT_PARAMS;
-  $('hv-wrap-p2').hidden = !rec.phase2;
-  if (rec.phase2) hvCharts.p2.setData(rowsToCurves(rec.phase2.rows), prm.gStart, prm.gStop, 'Phase 2');
-  $('hv-wrap-p3').hidden = !rec.phase3;
-  if (rec.phase3) hvCharts.p3.setData(rowsToCurves(rec.phase3.rows), prm.gStart - 5, prm.gStop - 5, 'Phase 3');
+  const hasSweeps = !!(rec.phase2 || rec.phase3);
+  $('hv-wrap-cv').hidden = !hasSweeps;
+  if (hasSweeps) {
+    hvCharts.cv.setData(
+      rec.phase2 ? rowsToCurves(rec.phase2.rows) : [],
+      rec.phase3 ? rowsToCurves(rec.phase3.rows) : [],
+      prm.gStart - 5, prm.gStop);
+  }
 }
 
 $('btn-hv-back').addEventListener('click', () => renderHistoryList());
