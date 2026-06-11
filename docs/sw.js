@@ -22,7 +22,9 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache: revalidate with the CDN instead of trusting the local HTTP
+    // cache, so updates appear as soon as the edge has them
+    fetch(e.request, { cache: 'no-cache' })
       .then((resp) => {
         const copy = resp.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});

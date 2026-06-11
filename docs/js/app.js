@@ -464,3 +464,4 @@ if (new URLSearchParams(location.search).has('demo')) {
   connectWith(new MockTransport());
 }
 setConnectedUi(false);
+window.__appBooted = true;  // boot-guard in index.html checks this

@@ -114,5 +114,16 @@
 </footer>
 
 <script type="module" src="js/app.js"></script>
+<script>
+  // If the module graph failed (often a CDN mid-deploy mix), say so instead
+  // of showing a dead page.
+  setTimeout(() => {
+    if (!window.__appBooted) {
+      const el = document.getElementById('scan-status');
+      if (el) el.textContent = 'App failed to start - if this follows an update, the CDN is ' +
+        'still settling (up to ~10 min). Hard-reload (Ctrl+Shift+R) or retry shortly.';
+    }
+  }, 4000);
+</script>
 </body>
 </html>
