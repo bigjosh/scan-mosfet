@@ -217,6 +217,9 @@ $('btn-scan').addEventListener('click', async () => {
   charts.p1.set(0, 0);
   charts.cvPos.reset(p.gStart, p.gStop, 'Vgs > 0');
   charts.cvNeg.reset(p.gStart - 5, p.gStop - 5, 'Vgs < 0 (High/Low roles reversed)');
+  // fixed x spans from the commanded H sweep window (no auto-ranging)
+  charts.cvPos.fixX(p.hStart, p.hStop);
+  charts.cvNeg.fixX(5 - p.hStop, 5 - p.hStart);
 
   const cb = {
     phaseStart(phase) {
@@ -353,9 +356,11 @@ async function renderHistoryView(id) {
   $('hv-chart-cv-pos').hidden = !rec.phase2;
   $('hv-chart-cv-neg').hidden = !rec.phase3;
   if (rec.phase2) {
+    hvCharts.cvPos.fixX(prm.hStart, prm.hStop);
     hvCharts.cvPos.setData(rowsToCurves(rec.phase2.rows), prm.gStart, prm.gStop, 'Vgs > 0');
   }
   if (rec.phase3) {
+    hvCharts.cvNeg.fixX(5 - prm.hStop, 5 - prm.hStart);
     hvCharts.cvNeg.setData(rowsToCurves(rec.phase3.rows, true),
       prm.gStart - 5, prm.gStop - 5, 'Vgs < 0 (High/Low roles reversed)');
   }

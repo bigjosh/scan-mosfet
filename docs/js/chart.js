@@ -82,6 +82,13 @@ export class FamilyChart extends CanvasBase {
     this.requestDraw();
   }
 
+  // Fix the x-axis to a given span (e.g. the commanded sweep window) instead
+  // of auto-ranging from data; pass null to return to auto.
+  fixX(x0, x1) {
+    this.xFix = (x1 > x0) ? [x0, x1] : null;
+    this.requestDraw();
+  }
+
   startCurve(vgs) {
     const t = this.cMax > this.cMin ? (vgs - this.cMin) / (this.cMax - this.cMin) : 0.5;
     this.curves.push({ label: vgs, color: viridis(t), xs: [], ys: [] });
@@ -116,6 +123,7 @@ export class FamilyChart extends CanvasBase {
     if (!isFinite(x0)) { x0 = 0; x1 = 5; y0 = 0; y1 = 1; }
     if (x1 - x0 < 1e-9) { x0 -= 0.5; x1 += 0.5; }
     if (y1 - y0 < 1e-9) { y0 -= 1; y1 += 1; }
+    if (this.xFix) { x0 = this.xFix[0]; x1 = this.xFix[1]; }
     const yp = (y1 - y0) * 0.06;
     return { x0, x1, y0: y0 - yp, y1: y1 + yp };
   }
@@ -156,7 +164,9 @@ export class FamilyChart extends CanvasBase {
     if (e.y0 < 0 && e.y1 > 0) { ctx.beginPath(); ctx.moveTo(ml, Y(0)); ctx.lineTo(ml + pw, Y(0)); ctx.stroke(); }
     ctx.globalAlpha = 1;
 
-    // curves
+    // curves (clipped so fixed-axis ranges can't leak outside the plot)
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, pw, ph); ctx.clip();
     ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
     for (const c of this.curves) {
       if (!c.xs.length) continue;
@@ -166,6 +176,7 @@ export class FamilyChart extends CanvasBase {
       for (let i = 1; i < c.xs.length; i++) ctx.lineTo(X(c.xs[i]), Y(c.ys[i]));
       ctx.stroke();
     }
+    ctx.restore();
 
     // labels
     ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
