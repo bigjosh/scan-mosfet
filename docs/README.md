@@ -4,11 +4,15 @@ Browser UI for the [Arduino scanner rig](../arduino-scanner/README.md), served
 by GitHub Pages from this folder. Replicates `scan_arduino.py` (3-phase scan,
 live charts, CSVs) and `bring-up.py` (guided wizard) — no install, no build.
 
-**Use it:** open the Pages URL in Chrome, plug the Uno into the phone (USB-OTG)
-or PC, tap **Connect**. Android uses WebUSB (we speak CDC-ACM ourselves —
-genuine/16U2 Unos only, not CH340 clones); desktop Chrome uses Web Serial.
-**Demo:** append `?demo` or tap the Demo button for a simulated rig, no
-hardware needed.
+**Use it:** open the Pages URL in Chrome, plug the Uno in, tap **Connect**.
+Desktop Chrome connects via Web Serial. **On Android phones use the shell
+APK from [Releases](https://github.com/bigjosh/scan-mosfet/releases)**
+(see [/android](../android/)): current Chrome blocks wired CDC devices for
+both WebUSB (data-interface class fence) and Web Serial (wired support still
+behind a flag), so the app injects a native USB bridge (`window.AndroidSerial`)
+that this page auto-prefers; it covers genuine Unos and CH340/FTDI/CP210x
+clones. **Demo:** append `?demo` or tap the Demo button for a simulated rig,
+no hardware needed.
 
 - Scans save to in-app History (IndexedDB); CSVs download on demand with the
   same columns/filenames as the Python tools.

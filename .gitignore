@@ -1,6 +1,14 @@
 __pycache__/
 *.pyc
 
+# Android shell build artifacts + local secrets
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+android/release.keystore
+
 # Measurement outputs / generated artifacts
 scan-*.csv
 scan-arduino-*.png

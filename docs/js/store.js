@@ -84,6 +84,15 @@ export function phase1Csv(p1) {
 }
 
 export function download(filename, text) {
+  // Inside the Android shell, blob downloads don't work in WebView - route
+  // through the native bridge, which writes into the system Downloads folder.
+  if (window.AndroidSerial && window.AndroidSerial.saveFile) {
+    const bytes = new TextEncoder().encode(text);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    window.AndroidSerial.saveFile(filename, btoa(bin));
+    return;
+  }
   const blob = new Blob([text], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

@@ -167,8 +167,72 @@ export class WebUsbCdcTransport extends BaseTransport {
   }
 }
 
-// Prefer Web Serial (desktop); fall back to WebUSB CDC (Android).
+// Native bridge injected by the Android shell app (android/). Talks to the
+// Android USB Host API directly, bypassing Chrome's WebUSB/Web Serial fences.
+export class AndroidBridgeTransport extends BaseTransport {
+  static available() { return typeof window !== 'undefined' && !!window.AndroidSerial; }
+  get label() { return 'Android USB'; }
+
+  async connect() {
+    const devices = JSON.parse(window.AndroidSerial.list());
+    if (!devices.length) {
+      throw new Error('No USB serial device found - plug the rig into the phone (OTG) and retry.');
+    }
+    const KNOWN = [0x2341, 0x2a03, 0x1a86, 0x0403, 0x10c4];
+    const dev = devices.find((d) => KNOWN.includes(d.vid)) || devices[0];
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('USB connect timed out (permission dialog still open?)')), 70000);
+      window.__androidSerialEvent = (ev) => {
+        if (ev.type === 'connect') {
+          clearTimeout(timer);
+          this._steady();
+          resolve();
+        } else if (ev.type === 'data') {
+          this._onData(b64ToBytes(ev.data));  // banner bytes may race 'connect'
+        } else if (ev.type === 'error' || ev.type === 'disconnect') {
+          clearTimeout(timer);
+          reject(new Error(ev.data || ev.type));
+        }
+      };
+      window.AndroidSerial.connect(dev.id, 115200);
+    });
+  }
+
+  _steady() {
+    window.__androidSerialEvent = (ev) => {
+      if (ev.type === 'data') this._onData(b64ToBytes(ev.data));
+      else if (ev.type === 'disconnect') this._onClose();
+      else if (ev.type === 'error') console.warn('AndroidSerial:', ev.data);
+    };
+  }
+
+  async write(bytes) {
+    window.AndroidSerial.write(bytesToB64(bytes));
+  }
+
+  async close() {
+    try { window.AndroidSerial.close(); } catch (e) { /* ignore */ }
+  }
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToB64(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+// Prefer the native bridge (inside the shell APK), then Web Serial (desktop),
+// then raw WebUSB CDC (Android browser, where Chrome still allows it).
 export function pickTransport() {
+  if (AndroidBridgeTransport.available()) return new AndroidBridgeTransport();
   if (WebSerialTransport.available()) return new WebSerialTransport();
   if (WebUsbCdcTransport.available()) return new WebUsbCdcTransport();
   return null;

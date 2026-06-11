@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- vendor-id is DECIMAL here -->
+    <usb-device vendor-id="9025" />   <!-- 0x2341 Arduino -->
+    <usb-device vendor-id="10755" />  <!-- 0x2A03 Arduino.org -->
+    <usb-device vendor-id="6790" />   <!-- 0x1A86 CH340 -->
+    <usb-device vendor-id="1027" />   <!-- 0x0403 FTDI -->
+    <usb-device vendor-id="4292" />   <!-- 0x10C4 CP210x -->
+</resources>

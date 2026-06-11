@@ -8,11 +8,18 @@ Charatarize a MOSFET with an Ids versus Vg and Vd scan
 > [arduino-scanner/plan.md](arduino-scanner/plan.md). The Siglent+Joulescope
 > bench below remains the reference instrument.
 >
-> **Web UI:** the rig also runs from the browser — Chrome on Android (WebUSB,
-> phone + OTG cable) or desktop (Web Serial) — with live charts, scan history,
-> and the full bring-up wizard. Served by GitHub Pages from [/docs](docs/)
-> (enable: Settings → Pages → `main` / `/docs`); try it with no hardware via
-> `?demo`.
+> **Web UI:** the rig also runs from the browser — live at
+> [bigjosh.github.io/scan-mosfet](https://bigjosh.github.io/scan-mosfet/)
+> (GitHub Pages from [/docs](docs/)) — live charts, scan history, the full
+> bring-up wizard; try it with no hardware via `?demo`. Desktop Chrome
+> connects via Web Serial.
+>
+> **Android app:** Chrome on Android currently blocks wired CDC serial
+> (WebUSB class fence; wired Web Serial still behind a flag), so phones use
+> the thin shell app in [/android](android/) — same web UI in a WebView plus
+> a native USB bridge (genuine Unos *and* CH340/FTDI/CP210x clones). Install
+> the APK from [Releases](https://github.com/bigjosh/scan-mosfet/releases);
+> app features still update via git push.
 
 ## Hardware
 
