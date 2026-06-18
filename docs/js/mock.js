@@ -35,6 +35,7 @@ export class MockTransport {
   constructor() {
     this._onData = () => {};
     this._onClose = () => {};
+    this._onProgress = () => {};
     this.codeH = 0;
     this.codeG = 0;
     this.lowio = '0';
@@ -48,8 +49,10 @@ export class MockTransport {
 
   onData(cb) { this._onData = cb; }
   onClose(cb) { this._onClose = cb; }
+  onProgress(cb) { this._onProgress = cb; }
 
   async connect() {
+    this._onProgress('starting simulated rig...');
     setTimeout(() => this._send('ArduinoMosfetScanner v1 DACH=0x60 DACG=0x60 VREFINT_MV=' +
       this.vrefIntMv + '\r\n'), 250);
   }

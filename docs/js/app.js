@@ -108,6 +108,22 @@ function setConnChip(text, cls) {
   chip.className = `chip ${cls}`;
 }
 
+// Step log for the connect sequence, shown in the troubleshooting <pre> with
+// elapsed timing so a hang or failure shows exactly which step and how long.
+function diagReset() {
+  const pre = $('usb-diag');
+  pre.textContent = '';
+  pre.hidden = true;
+  pre._t0 = null;
+}
+function diagLog(msg) {
+  const pre = $('usb-diag');
+  if (pre._t0 == null) pre._t0 = Date.now();
+  const dt = ((Date.now() - pre._t0) / 1000).toFixed(1);
+  pre.textContent += `[+${dt}s] ${msg}\n`;
+  pre.hidden = false;
+}
+
 function setConnectedUi(connected) {
   $('btn-scan').disabled = !connected || scanning;
   $('btn-bringup').disabled = !connected;
@@ -115,9 +131,11 @@ function setConnectedUi(connected) {
 }
 
 async function connectWith(transport) {
+  diagReset();
   try {
     setConnChip('connecting...', 'off');
     const r = new Rig(transport);
+    r.onProgress = (m) => { setConnChip(m, 'off'); diagLog(m); };
     await r.open();
     rig = r;
     rig.onDisconnect = () => {
@@ -131,6 +149,7 @@ async function connectWith(transport) {
     setConnChip(`${demo ? 'DEMO' : transport.label} · DAC ${dacs} · bg ${Math.round(rig.vrefIntV * 1000)} mV`,
       demo ? 'demo' : 'on');
     setConnectedUi(true);
+    diagLog(`connected · DAC ${dacs} · ${rig.banner}`);
     if (!rig.hasH || !rig.hasG) {
       $('scan-status').textContent =
         'Warning: firmware did not find both DACs - run Bring-up / check wiring.';
@@ -138,11 +157,15 @@ async function connectWith(transport) {
   } catch (e) {
     rig = null;
     setConnectedUi(false);
+    // Leave the device clean so a retry doesn't hit a stale open handle
+    // (that path surfaced as "open failed: controlTransfer failed").
+    try { await transport.close(); } catch (e2) { /* ignore */ }
     if (e && (e.name === 'NotFoundError' || /No port selected|cancelled/i.test(String(e)))) {
       setConnChip('disconnected', 'off');  // user closed the picker
     } else {
       setConnChip('connect failed', 'off');
       $('scan-status').textContent = `Connect failed: ${e.message || e}`;
+      diagLog(`FAILED: ${e.message || e}`);
     }
   }
 }

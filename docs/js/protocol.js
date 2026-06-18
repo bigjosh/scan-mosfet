@@ -10,6 +10,7 @@ export class Rig {
     this.hasG = false;
     this.vrefIntV = 1.1;
     this.onDisconnect = () => {};
+    this.onProgress = () => {};   // connect-sequence status for the UI
     this._buf = '';
     this._waiters = [];   // {resolve, reject, timer}
     this._chain = Promise.resolve();
@@ -24,18 +25,50 @@ export class Rig {
       this._failAll(new Error('device disconnected'));
       this.onDisconnect();
     });
-    const bannerP = this._expectLine((l) => l.startsWith('ArduinoMosfetScanner'), 6000);
-    await this.t.connect();          // may DTR-reset the board
-    this.banner = await bannerP;     // boot banner
-    // flush any port-open garbage the firmware line buffer may hold
+    if (this.t.onProgress) this.t.onProgress((m) => this._progress(m));
+
+    this._progress('opening link...');
+    await this.t.connect();          // picker / permission dialog lives in here
+    // Only start the banner clock now. On Android the USB permission dialog
+    // runs *inside* connect(); the old code armed the timeout before connect()
+    // so dialog time expired the window and the banner was reported as a
+    // "timeout waiting for reply". The board is also mid-bootloader for ~1-2 s
+    // after the DTR reset connect() triggers, so there is nothing to miss yet.
+    this.banner = await this._handshake();
+    this._progress('board ready');
+
+    // settle, then nudge the firmware's line buffer clear of any partial command
     await new Promise((r) => setTimeout(r, 120));
     await this.t.write(this._enc.encode('\n'));
     await new Promise((r) => setTimeout(r, 150));
-    this._drop = true;               // drop anything that arrived meanwhile
-    this._buf = '';
-    this._drop = false;
+    this._buf = '';                  // discard the nudge reply + any extra banners
     this._parseBanner(this.banner);
     this.connected = true;
+  }
+
+  // Obtain the boot banner robustly. The board normally auto-resets on connect
+  // (DTR) and prints the banner ~1-2 s later from setup(); wait for that first.
+  // If it never arrives (auto-reset didn't fire, or it was missed), actively
+  // poll IDN? -- the firmware answers IDN? with the same banner line. This is
+  // immune both to how long the permission dialog took and to a missed reset.
+  async _handshake() {
+    this._progress('waiting for board banner...');
+    try {
+      return await this._expectLine((l) => l.startsWith('ArduinoMosfetScanner'), 3000);
+    } catch (e) { /* no spontaneous banner; ask for it explicitly */ }
+    for (let i = 1; i <= 5; i++) {
+      this._progress(`no banner yet, polling IDN? (${i}/5)...`);
+      const p = this._expectLine((l) => l.startsWith('ArduinoMosfetScanner'), 1500);
+      try {
+        await this.t.write(this._enc.encode('IDN?\n'));
+        return await p;
+      } catch (e) { /* board may still be booting; retry */ }
+    }
+    throw new Error('no banner from board - it never replied to IDN? (check cable/baud)');
+  }
+
+  _progress(msg) {
+    try { this.onProgress(msg); } catch (e) { /* ignore */ }
   }
 
   _parseBanner(b) {

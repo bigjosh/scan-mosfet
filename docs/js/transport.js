@@ -11,9 +11,12 @@ class BaseTransport {
   constructor() {
     this._onData = () => {};
     this._onClose = () => {};
+    this._onProgress = () => {};
   }
   onData(cb) { this._onData = cb; }
   onClose(cb) { this._onClose = cb; }
+  onProgress(cb) { this._onProgress = cb; }    // step-by-step status for the UI
+  _progress(msg) { try { this._onProgress(msg); } catch (e) { /* ignore */ } }
 }
 
 export class WebSerialTransport extends BaseTransport {
@@ -21,8 +24,11 @@ export class WebSerialTransport extends BaseTransport {
   get label() { return 'Web Serial'; }
 
   async connect() {
+    this._progress('choose the serial port...');
     this.port = await navigator.serial.requestPort();
+    this._progress('opening port (115200)...');
     await this.port.open({ baudRate: 115200 });  // asserts DTR -> Uno resets
+    this._progress('port open');
     this._closing = false;
     this._readLoop();
   }
@@ -64,6 +70,7 @@ export class WebUsbCdcTransport extends BaseTransport {
   get label() { return 'WebUSB (CDC)'; }
 
   async connect() {
+    this._progress('choose the USB device...');
     this.device = await navigator.usb.requestDevice({
       filters: [
         { vendorId: 0x2341 },  // Arduino
@@ -98,6 +105,7 @@ export class WebUsbCdcTransport extends BaseTransport {
       await d.claimInterface(this.commIf);
       await d.claimInterface(this.dataIf);
     };
+    this._progress('claiming CDC interfaces...');
     try {
       await claimBoth();
     } catch (e1) {
@@ -129,6 +137,7 @@ export class WebUsbCdcTransport extends BaseTransport {
     await d.controlTransferOut(
       { requestType: 'class', recipient: 'interface', request: 0x22, value: 0x03, index: this.commIf });
 
+    this._progress('port open');
     this._closing = false;
     navigator.usb.addEventListener('disconnect', (ev) => {
       if (ev.device === this.device && !this._closing) this._onClose();
@@ -174,18 +183,23 @@ export class AndroidBridgeTransport extends BaseTransport {
   get label() { return 'Android USB'; }
 
   async connect() {
+    this._progress('listing USB devices...');
     const devices = JSON.parse(window.AndroidSerial.list());
     if (!devices.length) {
       throw new Error('No USB serial device found - plug the rig into the phone (OTG) and retry.');
     }
     const KNOWN = [0x2341, 0x2a03, 0x1a86, 0x0403, 0x10c4];
     const dev = devices.find((d) => KNOWN.includes(d.vid)) || devices[0];
+    const hex = (n) => '0x' + (n >>> 0).toString(16).padStart(4, '0');
+    this._progress(`device: ${dev.name || dev.driver || 'serial'} ${hex(dev.vid)}:${hex(dev.pid)}`);
+    this._progress('opening - approve the USB permission if asked...');
     await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error('USB connect timed out (permission dialog still open?)')), 70000);
       window.__androidSerialEvent = (ev) => {
         if (ev.type === 'connect') {
           clearTimeout(timer);
+          this._progress('port open');
           this._steady();
           resolve();
         } else if (ev.type === 'data') {
