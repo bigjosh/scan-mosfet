@@ -20,3 +20,8 @@ bringup-*.png
 *_nmmin_heatmap.html
 mosfet_search_*
 *_filtered.csv
+
+# Local batch folders hold raw scans (their CSVs are ignored above anyway). The
+# published copies under docs/batches are tracked on purpose, CSVs included.
+/batches/
+!docs/batches/**

@@ -8,6 +8,7 @@ and Joulescope JS110 current meter.
 
 import argparse
 import csv
+import os
 import time
 from datetime import datetime
 from typing import List, Tuple
@@ -26,6 +27,41 @@ except ImportError:
     sys.exit(1)
 
 import numpy as np
+
+# Output voltage range of each SPD3303C channel. Setpoints are checked against
+# this before a scan starts, which matters once an external Vgs bias is in play.
+SUPPLY_MAX_VOLTAGE = 32.0
+
+# A batch is just a subdirectory of this folder that groups related scans.
+BATCHES_DIR = "batches"
+
+
+def resolve_output(output, batch, prefix):
+    """Return the CSV path for a scan.
+
+    output: filename from --output, or None for <prefix>-<timestamp>.csv.
+    batch:  batch name from --batch, or None. With a batch the file goes under
+            batches/<batch>/ (created on demand).
+    """
+    if output is None:
+        output = f"{prefix}-{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    if batch:
+        batch_dir = os.path.join(BATCHES_DIR, batch)
+        os.makedirs(batch_dir, exist_ok=True)
+        output = os.path.join(batch_dir, output)
+    return output
+
+
+def print_photo_hint(csv_path):
+    """Print the photo_drop.py URL (and a QR code) that attaches a phone photo to this scan."""
+    try:
+        from photo_drop import DEFAULT_PORT, lan_ip, print_qr
+    except ImportError:
+        return
+    base = os.path.splitext(os.path.basename(csv_path))[0]
+    url = f"http://{lan_ip()}:{DEFAULT_PORT}/?name={base}"
+    print(f"Phone photo for this scan (with photo_drop.py running): {url}")
+    print_qr(url)
 
 
 class PowerSupply:
@@ -135,23 +171,28 @@ class JoulescopeMeter:
             print("\nTry running with --dry-run to test without Joulescope")
             raise
     
-    def measure_current(self, num_samples: int = 10, sample_delay: float = 0.01) -> float:
+    def measure(self, num_samples: int = 10, sample_delay: float = 0.01) -> Tuple[float, float]:
         """
-        Measure current multiple times and return average
+        Measure current and voltage multiple times and return the averages
+        
+        The voltage is what the Joulescope sees at its OUT terminals, which in
+        this wiring is the actual drain-source voltage at the MOSFET.
         
         Args:
             num_samples: Number of samples to take
             sample_delay: Delay between samples in seconds
             
         Returns:
-            Average current in Amps
+            (average current in Amps, average voltage in Volts)
         """
         if self.mock_mode:
-            # Return mock data for testing
+            # Return mock data for testing. There is no real voltage reading,
+            # so report NaN rather than inventing one.
             time.sleep(sample_delay * num_samples)
-            return np.random.uniform(0.001, 0.1)  # Random current between 1mA and 100mA
+            return np.random.uniform(0.001, 0.1), float('nan')  # Random current between 1mA and 100mA
         
         samples = []
+        v_samples = []
         
         for _ in range(num_samples):
             # Read current from Joulescope stream buffer
@@ -163,14 +204,14 @@ class JoulescopeMeter:
             sample_count = int(self.js.sampling_frequency * 0.01)  # 10ms of data
             start_id = max(sample_range[0], sample_range[1] - sample_count)
             
-            data = buf.samples_get(start_id, sample_range[1], ['current'])
-            current_mean = data['signals']['current']['value'].mean()
-            samples.append(current_mean)
+            data = buf.samples_get(start_id, sample_range[1], ['current', 'voltage'])
+            samples.append(data['signals']['current']['value'].mean())
+            v_samples.append(data['signals']['voltage']['value'].mean())
             
             if sample_delay > 0:
                 time.sleep(sample_delay)
         
-        return np.mean(samples)
+        return np.mean(samples), np.mean(v_samples)
     
     def start_streaming(self):
         """Start Joulescope streaming"""
@@ -210,13 +251,17 @@ def perform_scan(
     num_samples: int,
     sample_delay: float,
     verbose: bool,
-    csv_filename: str = None
+    csv_filename: str = None,
+    vgs_offset: float = 0.0
 ) -> Tuple[List[float], List[List[float]], List[List[float]]]:
     """
     Perform MOSFET characterization scan
     
     Args:
         csv_filename: Optional CSV file to write incrementally during scan
+        vgs_offset: Voltage of an external bias in series with CH2 (e.g. an inline
+            battery). vgs_start/vgs_stop and the recorded Vgs are the voltages at the
+            gate; CH2 is set to Vgs - vgs_offset.
     
     Returns:
         Tuple of (vds_values, vgs_matrix, ids_matrix)
@@ -245,8 +290,9 @@ def perform_scan(
     if csv_filename:
         with open(csv_filename, 'w', newline='') as f:
             # Clean fixed-width alignment: 
-            # Vds (8 chars), Vgs (8 chars), Ids (12 chars)
-            f.write(f"{'Vds (V)':>8}, {'Vgs (V)':>8}, {'Ids (uA)':>12}\n")
+            # Vds setpoint (8 chars), Vgs (8 chars), Ids (12 chars), Vds measured by Joulescope (12 chars).
+            # Measured Vds is appended last so readers that use the first three columns are unaffected.
+            f.write(f"{'Vds (V)':>8}, {'Vgs (V)':>8}, {'Ids (uA)':>12}, {'Vds meas (V)':>12}\n")
         print(f"Writing incremental results to: {csv_filename}")
     
     total_measurements = len(vgs_values_full) * len(vds_values_full)
@@ -266,8 +312,11 @@ def perform_scan(
         ps.set_voltage(2, 0)
         time.sleep(reset_delay)
         
-        # Set Vgs (Channel 2)
-        ps.set_voltage(2, vgs)
+        # Set Vgs (Channel 2). Vgs is the voltage at the gate; with an external bias
+        # in series with CH2 the supply has to make up the difference.
+        # max() only guards against -0.000 from float noise (range is checked in main).
+        ch2 = max(0.0, vgs - vgs_offset)
+        ps.set_voltage(2, ch2)
         
         # Inner loop: sweep Vds (Faster)
         # Note: For triangular sweep support (Vgs <= Vds), we could filter vds_values here.
@@ -280,21 +329,22 @@ def perform_scan(
             # Wait for settling
             time.sleep(setup_delay)
             
-            # Measure Ids
-            ids = js.measure_current(num_samples, sample_delay)
+            # Measure Ids and the actual Vds at the MOSFET
+            ids, vds_meas = js.measure(num_samples, sample_delay)
             
             measurement_count += 1
             
             if verbose:
                 elapsed = time.time() - start_time
                 progress = (measurement_count / total_measurements) * 100
-                print(f"[{progress:5.1f}%] Vgs={vgs:6.2f}V, Vds={vds:6.2f}V, Ids={ids*1000:8.3f}mA (avg of {num_samples} samples)")
+                ch2_note = f" (CH2 {ch2:5.2f}V)" if vgs_offset else ""
+                print(f"[{progress:5.1f}%] Vgs={vgs:6.2f}V{ch2_note}, Vds={vds:6.2f}V (meas {vds_meas:7.3f}V), Ids={ids*1000:8.3f}mA (avg of {num_samples} samples)")
 
             # Append to CSV file immediately
             if csv_filename:
                 with open(csv_filename, 'a', newline='') as f:
                     # Fixed-point formatting, aligned
-                    f.write(f"{vds:8.2f}, {vgs:8.2f}, {ids*1e6:12.2f}\n")
+                    f.write(f"{vds:8.2f}, {vgs:8.2f}, {ids*1e6:12.2f}, {vds_meas:12.4f}\n")
         
     elapsed = time.time() - start_time
     print("-" * 60)
@@ -410,6 +460,11 @@ def main():
                         help='Stopping Vgs voltage (V). If not specified, sweeps up to current Vds.')
     parser.add_argument('--vgs-step', type=float, default=0.1,
                         help='Vgs voltage step (V)')
+    parser.add_argument('--vgs-offset', type=float, default=0.0,
+                        help='Voltage of an external bias in series with CH2, e.g. an inline battery, '
+                             'so that Vgs = CH2 + offset. The --vgs-* values are the voltages at the gate; '
+                             'CH2 is set to Vgs - offset. A battery that makes Vgs=-3V when CH2=0V is '
+                             '--vgs-offset -3')
     
     # Timing parameters
     parser.add_argument('--setup-delay', type=float, default=1.0,
@@ -424,6 +479,8 @@ def main():
     # Output parameters
     parser.add_argument('--output', type=str, default=None,
                         help='Output CSV filename (default: scan-mosfet-<timestamp>.csv)')
+    parser.add_argument('--batch', type=str, default=None,
+                        help='Group this scan with others: the CSV goes in batches/<name>/ (created if needed)')
     parser.add_argument('--quiet', action='store_true',
                         help='Disable progress output')
     
@@ -435,11 +492,21 @@ def main():
     
     args = parser.parse_args()
     
-    # Generate output filename with timestamp if not specified
-    if args.output is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output = f"scan-mosfet-{timestamp}.csv"
+    # Output path: <prefix>-<timestamp>.csv unless given, inside batches/<batch>/ if requested
+    args.output = resolve_output(args.output, args.batch, "scan-mosfet")
     
+    # Every Vgs point is produced as CH2 = Vgs - offset. Check the whole sweep is
+    # reachable by the supply before connecting to anything.
+    vgs_stop_val = args.vds_stop if args.vgs_stop is None else args.vgs_stop
+    ch2_lo = min(args.vgs_start, vgs_stop_val) - args.vgs_offset
+    ch2_hi = max(args.vgs_start, vgs_stop_val) - args.vgs_offset
+    if ch2_lo < 0 or ch2_hi > SUPPLY_MAX_VOLTAGE:
+        parser.error(
+            f"Vgs {args.vgs_start}V to {vgs_stop_val}V with --vgs-offset {args.vgs_offset} "
+            f"needs CH2 from {ch2_lo:.2f}V to {ch2_hi:.2f}V, but the supply only does "
+            f"0V to {SUPPLY_MAX_VOLTAGE:g}V"
+        )
+
     # Print configuration
     print("=" * 60)
     print("MOSFET Characterization Scanner")
@@ -449,11 +516,15 @@ def main():
         print(f"Vgs range: {args.vgs_start}V to {args.vgs_stop}V in {args.vgs_step}V steps")
     else:
         print(f"Vgs range: {args.vgs_start}V to Vds in {args.vgs_step}V steps")
+    if args.vgs_offset:
+        print(f"Vgs offset: {args.vgs_offset:+g}V external bias on CH2, so CH2 is set to "
+              f"{ch2_lo:g}V to {ch2_hi:g}V (Vgs - offset)")
     print(f"Setup delay: {args.setup_delay*1000}ms")
     print(f"Samples per point: {args.num_samples}")
     print(f"Sample delay: {args.sample_delay*1000}ms")
     print(f"Output file: {args.output}")
     print("=" * 60)
+    print_photo_hint(args.output)
     print("\nNOTE: Configure power supply ON/OFF and current limits manually")
     
     # Initialize hardware
@@ -497,7 +568,8 @@ def main():
             num_samples=args.num_samples,
             sample_delay=args.sample_delay,
             verbose=not args.quiet,
-            csv_filename=args.output  # Enable incremental writing
+            csv_filename=args.output,  # Enable incremental writing
+            vgs_offset=args.vgs_offset
         )
         
         # Final save to ensure data is complete (already written incrementally)

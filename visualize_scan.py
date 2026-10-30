@@ -364,6 +364,8 @@ def main():
                         help='Refresh rate in seconds for live monitoring')
     parser.add_argument('--static', action='store_true',
                         help='Show static plot (no live updates)')
+    parser.add_argument('--batch', type=str, default=None,
+                        help='Look in batches/<name>/ for the newest scan (or for a bare csv_file name)')
     
     args = parser.parse_args()
     
@@ -372,15 +374,19 @@ def main():
     
     if csv_file is None:
         # Find most recent scan-mosfet CSV file
-        csv_files = list(Path('.').glob('scan-mosfet-*.csv'))
+        search_dir = os.path.join('batches', args.batch) if args.batch else '.'
+        csv_files = list(Path(search_dir).glob('scan-mosfet-*.csv'))
         if not csv_files:
-            print("Error: No scan-mosfet-*.csv files found in current directory")
+            print(f"Error: No scan-mosfet-*.csv files found in {search_dir}")
             print("Please specify a CSV file or run scan_mosfet.py first")
             sys.exit(1)
         
         # Get most recent file
         csv_file = max(csv_files, key=lambda p: p.stat().st_mtime)
         print(f"Auto-detected file: {csv_file}")
+    elif args.batch and not os.path.exists(csv_file):
+        # A bare filename with --batch is looked up inside the batch folder
+        csv_file = os.path.join('batches', args.batch, csv_file)
     
     if not os.path.exists(csv_file):
         print(f"Error: File not found: {csv_file}")
